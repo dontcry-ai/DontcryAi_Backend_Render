@@ -5,7 +5,7 @@ services:
     region: singapore
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app_with_validator:app --bind 0.0.0.0:$PORT --workers 1 --timeout 300 --log-file=-
+    startCommand: gunicorn app1:app --bind 0.0.0.0:$PORT --workers 1 --timeout 300 --log-file=-
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.12

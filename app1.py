@@ -8,12 +8,6 @@ Usage:
     python app_with_validator.py
 """
 
-
-
-
-
-
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -31,6 +25,12 @@ import torch.nn as nn
 from transformers import HubertModel, Wav2Vec2FeatureExtractor
 import warnings
 warnings.filterwarnings('ignore')
+from download_models import download_models
+
+# Download models before initializing
+print("Checking for model files...")
+download_models()
+print("✓ Model files ready!")
 
 # ============================================================================
 # BABY VOICE VALIDATOR CLASSES
@@ -353,9 +353,9 @@ app.config['ALLOWED_EXTENSIONS'] = {'wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm'}
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Model paths
-VALIDATOR_MODEL_PATH = '/home/sandy/ml-projects/crybaby/validator_models/neural_classifier.pth'
-CRY_CLASSIFIER_MODEL_PATH = '/home/sandy/ml-projects/crybaby/models/best_model.pth'
-LABEL_ENCODER_PATH = '/home/sandy/ml-projects/crybaby/models/label_encoder.json'
+VALIDATOR_MODEL_PATH = 'validator_models/neural_classifier.pth'
+CRY_CLASSIFIER_MODEL_PATH = 'models/best_model.pth'
+LABEL_ENCODER_PATH = 'models/label_encoder.json'
 
 # Global models
 validator = None
@@ -692,6 +692,9 @@ def internal_error(error):
 # ============================================================================
 
 if __name__ == '__main__':
+
+    port = int(os.environ.get('PORT', 5000))
+
     print("=" * 70)
     print("FLASK BACKEND WITH BABY VOICE VALIDATION")
     print("=" * 70)
@@ -717,5 +720,6 @@ if __name__ == '__main__':
     
     print("\n🚀 Starting server on http://localhost:5000")
     print("=" * 70 + "\n")
+    print(f"✓ Running on port: {port}")
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)
