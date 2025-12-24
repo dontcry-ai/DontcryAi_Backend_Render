@@ -32,6 +32,24 @@ print("Checking for model files...")
 download_models()
 print("✓ Model files ready!")
 
+@app.route('/')
+def home():
+    """Root endpoint"""
+    return jsonify({
+        "message": "DontCryAI Backend API",
+        "status": "running",
+        "version": "1.0",
+        "endpoints": {
+            "health": "/api/health",
+            "validator_status": "/api/validator/status",
+            "validate_audio": "/api/validate/audio",
+            "predict_upload": "/api/predict/upload",
+            "predict_record": "/api/predict/record",
+            "get_classes": "/api/classes"
+        },
+        "docs": "https://github.com/dontcry-ai/DontcryAi_Backend_Render"
+    })
+
 # ============================================================================
 # BABY VOICE VALIDATOR CLASSES
 # ============================================================================
