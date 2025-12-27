@@ -1,11 +1,5 @@
 """
 Part 4: Flask API with Baby Voice Validation
-Integrates hybrid validator into existing Flask API (Phase 4)
-
-This is your complete backend with validation.
-
-Usage:
-    python app_with_validator.py
 """
 
 from flask import Flask, request, jsonify
@@ -156,17 +150,7 @@ class HybridBabyVoiceValidator:
         self.neural_model.eval()
     
     def validate_audio_array(self, audio, sr=16000, freq_weight=0.3, neural_weight=0.7, threshold=0.65):
-        """
-        Validate if audio is baby voice
-        
-        Returns:
-            dict: {
-                'is_baby_voice': bool,
-                'combined_confidence': float,
-                'frequency_analysis': dict,
-                'neural_classification': dict
-            }
-        """
+        """Validate if audio is baby voice"""
         # Normalize audio
         if np.max(np.abs(audio)) > 0:
             audio = audio / np.max(np.abs(audio))
@@ -177,13 +161,11 @@ class HybridBabyVoiceValidator:
         
         # Layer 2: Neural Classification
         try:
-            # Extract mel spectrogram
             mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_mels=128, fmax=8000)
             mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
             mel_spec_db = (mel_spec_db - mel_spec_db.mean()) / (mel_spec_db.std() + 1e-6)
             
-            # Pad or truncate to consistent size
-            target_width = 313  # Standard for 5-second audio
+            target_width = 313
             if mel_spec_db.shape[1] < target_width:
                 mel_spec_db = np.pad(mel_spec_db, ((0, 0), (0, target_width - mel_spec_db.shape[1])))
             else:
@@ -220,11 +202,11 @@ class HybridBabyVoiceValidator:
 
 
 # ============================================================================
-# CRY CLASSIFIER (YOUR EXISTING PHASE 2 MODEL)
+# CRY CLASSIFIER
 # ============================================================================
 
 class HuBERTClassifier(nn.Module):
-    """Your existing 5-class cry classifier"""
+    """5-class cry classifier"""
     
     def __init__(self, num_classes, hubert_model_name="facebook/hubert-base-ls960", freeze_encoder=False):
         super(HuBERTClassifier, self).__init__()
@@ -281,7 +263,7 @@ class AudioPreprocessor:
 
 
 class InfantCryPredictor:
-    """Your existing cry type classifier"""
+    """Cry type classifier"""
     
     def __init__(self, model_path, label_encoder_path, device='cuda'):
         self.device = device if torch.cuda.is_available() else 'cpu'
@@ -439,13 +421,10 @@ def home():
         "version": "1.0",
         "endpoints": {
             "health": "/api/health",
-            "validator_status": "/api/validator/status",
-            "validate_audio": "/api/validate/audio",
             "predict_upload": "/api/predict/upload",
             "predict_record": "/api/predict/record",
             "get_classes": "/api/classes"
-        },
-        "docs": "https://github.com/dontcry-ai/DontcryAi_Backend_Render"
+        }
     })
 
 
@@ -463,90 +442,18 @@ def health_check():
     })
 
 
-@app.route('/api/validate/audio', methods=['POST'])
-def validate_audio_only():
-    """
-    NEW ENDPOINT: Validate if audio is baby voice (no classification)
-    
-    Request:
-        - file: Audio file
-        - threshold: Optional validation threshold (default 0.65)
-    
-    Response:
-        - is_baby_voice: bool
-        - combined_confidence: float
-        - frequency_analysis: dict
-        - neural_classification: dict
-    """
-    try:
-        if not VALIDATION_ENABLED or validator is None:
-            return jsonify({
-                'success': False,
-                'error': 'Validator not available',
-                'message': 'Validation service is currently unavailable.'
-            }), 503
-        
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
-        
-        file = request.files['file']
-        
-        if file.filename == '' or not allowed_file(file.filename):
-            return jsonify({'error': 'Invalid file'}), 400
-        
-        threshold = float(request.form.get('threshold', 0.65))
-        
-        # Save and process file
-        filename = secure_filename(file.filename)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        temp_filename = f"{timestamp}_{filename}"
-        temp_path = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
-        file.save(temp_path)
-        
-        # Convert if needed
-        if not filename.lower().endswith('.wav'):
-            wav_path = temp_path.rsplit('.', 1)[0] + '.wav'
-            if not convert_to_wav(temp_path, wav_path):
-                os.remove(temp_path)
-                return jsonify({'error': 'Audio conversion failed'}), 500
-            os.remove(temp_path)
-            temp_path = wav_path
-        
-        # Load audio
-        audio, sr = load_audio_file(temp_path)
-        
-        # Validate
-        validation_result = validator.validate_audio_array(audio, sr, threshold=threshold)
-        
-        # Cleanup
-        os.remove(temp_path)
-        
-        validation_result['timestamp'] = datetime.now().isoformat()
-        
-        return jsonify({
-            'success': True,
-            'data': validation_result
-        })
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 @app.route('/api/predict/upload', methods=['POST'])
 def predict_upload():
-    """
-    MODIFIED: Predict with validation
-    
-    Request:
-        - file: Audio file
-        - confidence_threshold: Optional (default 0.6)
-        - validation_threshold: Optional (default 0.65)
-    
-    Response:
-        - validation: Validation result
-        - prediction: Cry type classification (only if validated)
-    """
+    """Predict with optional validation"""
     try:
+        # Check if cry_predictor is loaded
+        if cry_predictor is None:
+            return jsonify({
+                'success': False,
+                'error': 'Model not initialized',
+                'message': 'The prediction model is not available. Please try again later.'
+            }), 503
+        
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
         
@@ -605,7 +512,7 @@ def predict_upload():
                 'message': 'Validation is currently unavailable'
             }
         
-        # STEP 2: CLASSIFY (Cry type prediction)
+        # STEP 2: CLASSIFY
         prediction_result = cry_predictor.predict_array(audio, sr, confidence_threshold)
         
         # Cleanup
@@ -628,10 +535,16 @@ def predict_upload():
 
 @app.route('/api/predict/record', methods=['POST'])
 def predict_record():
-    """
-    MODIFIED: Predict from recording with validation
-    """
+    """Predict from recording with optional validation"""
     try:
+        # Check if cry_predictor is loaded
+        if cry_predictor is None:
+            return jsonify({
+                'success': False,
+                'error': 'Model not initialized',
+                'message': 'The prediction model is not available. Please try again later.'
+            }), 503
+        
         data = request.get_json()
         
         if not data:
@@ -719,25 +632,6 @@ def get_classes():
     return jsonify({'error': 'Predictor not initialized'}), 500
 
 
-@app.route('/api/validator/status', methods=['GET'])
-def validator_status():
-    """NEW: Get validator status"""
-    if validator and VALIDATION_ENABLED:
-        return jsonify({
-            'status': 'active',
-            'model_type': 'Hybrid (Frequency + Neural)',
-            'validation_threshold': 0.65,
-            'weights': {
-                'frequency': 0.3,
-                'neural': 0.7
-            }
-        })
-    return jsonify({
-        'status': 'inactive',
-        'message': 'Validator not initialized'
-    }), 200
-
-
 # ============================================================================
 # ERROR HANDLERS
 # ============================================================================
@@ -758,20 +652,16 @@ def internal_error(error):
 
 
 # ============================================================================
-# MAIN
+# INITIALIZE MODELS AT MODULE LEVEL (FOR GUNICORN)
 # ============================================================================
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
+print("=" * 70)
+print("INITIALIZING BACKEND")
+print("=" * 70)
 
-    print("=" * 70)
-    print("FLASK BACKEND WITH BABY VOICE VALIDATION")
-    print("=" * 70)
-    
-    if not init_models():
-        print("✗ Failed to initialize models. Exiting.")
-        exit(1)
-    
+if not init_models():
+    print("✗ Failed to initialize models.")
+else:
     print(f"\n✓ Backend ready!")
     if cry_predictor:
         print(f"✓ Device: {cry_predictor.device}")
@@ -780,20 +670,12 @@ if __name__ == '__main__':
     if VALIDATION_ENABLED:
         print("✓ Validation: ENABLED")
     else:
-        print("⚠ Validation: DISABLED (optional feature)")
+        print("⚠ Validation: DISABLED")
     
-    print("\n" + "=" * 70)
-    print("API ENDPOINTS")
     print("=" * 70)
-    print("GET  /api/health              - Health check")
-    print("GET  /api/validator/status    - Validator status")
-    print("POST /api/validate/audio      - Validate baby voice only")
-    print("POST /api/predict/upload      - Upload + Validate + Predict")
-    print("POST /api/predict/record      - Record + Validate + Predict")
-    print("GET  /api/classes             - Get cry types")
-    print("=" * 70)
-    
-    print(f"\n🚀 Starting server on http://0.0.0.0:{port}")
-    print("=" * 70 + "\n")
-    
+
+# For local development
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    print(f"\n🚀 Starting local server on http://0.0.0.0:{port}\n")
     app.run(host='0.0.0.0', port=port, debug=False)
