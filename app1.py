@@ -368,6 +368,7 @@ def init_models():
     global validator, cry_predictor, VALIDATION_ENABLED
 
     try:
+        # Initialize Cry Classifier (REQUIRED)
         print("\nInitializing Cry Classifier...")
         cry_predictor = InfantCryPredictor(
             model_path=CRY_CLASSIFIER_MODEL_PATH,
@@ -375,26 +376,25 @@ def init_models():
             device='cuda' if torch.cuda.is_available() else 'cpu'
         )
         print("✓ Cry classifier loaded successfully!")
-    
-    try:
-        print("\nInitializing Baby Voice Validator...")
-        validator = HybridBabyVoiceValidator(
-            neural_model_path=VALIDATOR_MODEL_PATH,
-            device='cuda' if torch.cuda.is_available() else 'cpu'
-        )
-        print("✓ Validator loaded successfully!")
         
-        print("\nInitializing Cry Classifier...")
-        cry_predictor = InfantCryPredictor(
-            model_path=CRY_CLASSIFIER_MODEL_PATH,
-            label_encoder_path=LABEL_ENCODER_PATH,
-            device='cuda' if torch.cuda.is_available() else 'cpu'
-        )
-        print("✓ Cry classifier loaded successfully!")
+        # Try to initialize Validator (OPTIONAL)
+        try:
+            print("\nInitializing Baby Voice Validator...")
+            validator = HybridBabyVoiceValidator(
+                neural_model_path=VALIDATOR_MODEL_PATH,
+                device='cuda' if torch.cuda.is_available() else 'cpu'
+            )
+            VALIDATION_ENABLED = True
+            print("✓ Validator loaded successfully!")
+        except Exception as val_error:
+            print(f"⚠ Warning: Validator could not be loaded: {val_error}")
+            print("⚠ Continuing without validation...")
+            VALIDATION_ENABLED = False
         
         return True
+        
     except Exception as e:
-        print(f"✗ Error initializing models: {e}")
+        print(f"✗ Error initializing cry classifier: {e}")
         return False
 
 
@@ -448,6 +448,7 @@ def home():
         "docs": "https://github.com/dontcry-ai/DontcryAi_Backend_Render"
     })
 
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check"""
@@ -478,6 +479,13 @@ def validate_audio_only():
         - neural_classification: dict
     """
     try:
+        if not VALIDATION_ENABLED or validator is None:
+            return jsonify({
+                'success': False,
+                'error': 'Validator not available',
+                'message': 'Validation service is currently unavailable.'
+            }), 503
+        
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
         
@@ -538,13 +546,6 @@ def predict_upload():
         - validation: Validation result
         - prediction: Cry type classification (only if validated)
     """
-    if validator is None:
-        return jsonify({
-            'success': False,
-            'error': 'Validator not initialized',
-            'message': 'The validation model is not available. Please contact support.'
-        }), 503
-        
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
@@ -576,21 +577,33 @@ def predict_upload():
         # Load audio
         audio, sr = load_audio_file(temp_path)
         
-        # STEP 1: VALIDATE (Baby voice check)
+        # STEP 1: VALIDATE (only if enabled)
         validation_result = None
         if VALIDATION_ENABLED and validator is not None:
-            validation_result = validator.validate_audio_array(audio, sr, threshold=validation_threshold)
-            
-            # If NOT baby voice, return early
-            if not validation_result['is_baby_voice']:
-                os.remove(temp_path)
-                return jsonify({
-                    'success': False,
-                    'error': 'Audio validation failed',
-                    'message': 'This does not appear to be a baby cry. Please upload baby cry audio only.',
-                    'validation': validation_result,
-                    'timestamp': datetime.now().isoformat()
-                }), 400
+            try:
+                validation_result = validator.validate_audio_array(audio, sr, threshold=validation_threshold)
+                
+                # If NOT baby voice, return early
+                if not validation_result['is_baby_voice']:
+                    os.remove(temp_path)
+                    return jsonify({
+                        'success': False,
+                        'error': 'Audio validation failed',
+                        'message': 'This does not appear to be a baby cry. Please upload baby cry audio only.',
+                        'validation': validation_result,
+                        'timestamp': datetime.now().isoformat()
+                    }), 400
+            except Exception as val_error:
+                print(f"⚠ Validation error: {val_error}")
+                validation_result = {
+                    'status': 'error',
+                    'message': 'Validation temporarily unavailable'
+                }
+        else:
+            validation_result = {
+                'status': 'disabled',
+                'message': 'Validation is currently unavailable'
+            }
         
         # STEP 2: CLASSIFY (Cry type prediction)
         prediction_result = cry_predictor.predict_array(audio, sr, confidence_threshold)
@@ -609,6 +622,7 @@ def predict_upload():
         })
     
     except Exception as e:
+        print(f"Error in predict_upload: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -651,17 +665,31 @@ def predict_record():
         else:
             return jsonify({'error': 'Invalid format'}), 400
         
-        # STEP 1: VALIDATE
-        validation_result = validator.validate_audio_array(audio, sr, threshold=validation_threshold)
-        
-        if not validation_result['is_baby_voice']:
-            return jsonify({
-                'success': False,
-                'error': 'Audio validation failed',
-                'message': 'This does not appear to be a baby cry.',
-                'validation': validation_result,
-                'timestamp': datetime.now().isoformat()
-            }), 400
+        # STEP 1: VALIDATE (only if enabled)
+        validation_result = None
+        if VALIDATION_ENABLED and validator is not None:
+            try:
+                validation_result = validator.validate_audio_array(audio, sr, threshold=validation_threshold)
+                
+                if not validation_result['is_baby_voice']:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Audio validation failed',
+                        'message': 'This does not appear to be a baby cry.',
+                        'validation': validation_result,
+                        'timestamp': datetime.now().isoformat()
+                    }), 400
+            except Exception as val_error:
+                print(f"⚠ Validation error: {val_error}")
+                validation_result = {
+                    'status': 'error',
+                    'message': 'Validation temporarily unavailable'
+                }
+        else:
+            validation_result = {
+                'status': 'disabled',
+                'message': 'Validation is currently unavailable'
+            }
         
         # STEP 2: CLASSIFY
         prediction_result = cry_predictor.predict_array(audio, sr, confidence_threshold)
@@ -676,6 +704,7 @@ def predict_record():
         })
     
     except Exception as e:
+        print(f"Error in predict_record: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -693,7 +722,7 @@ def get_classes():
 @app.route('/api/validator/status', methods=['GET'])
 def validator_status():
     """NEW: Get validator status"""
-    if validator:
+    if validator and VALIDATION_ENABLED:
         return jsonify({
             'status': 'active',
             'model_type': 'Hybrid (Frequency + Neural)',
@@ -703,7 +732,10 @@ def validator_status():
                 'neural': 0.7
             }
         })
-    return jsonify({'error': 'Validator not initialized'}), 500
+    return jsonify({
+        'status': 'inactive',
+        'message': 'Validator not initialized'
+    }), 200
 
 
 # ============================================================================
@@ -730,7 +762,6 @@ def internal_error(error):
 # ============================================================================
 
 if __name__ == '__main__':
-
     port = int(os.environ.get('PORT', 5000))
 
     print("=" * 70)
@@ -741,23 +772,28 @@ if __name__ == '__main__':
         print("✗ Failed to initialize models. Exiting.")
         exit(1)
     
-    print(f"\n✓ Backend ready with validation!")
-    print(f"✓ Device: {cry_predictor.device}")
-    print(f"✓ Cry classes: {cry_predictor.classes}")
+    print(f"\n✓ Backend ready!")
+    if cry_predictor:
+        print(f"✓ Device: {cry_predictor.device}")
+        print(f"✓ Cry classes: {cry_predictor.classes}")
+    
+    if VALIDATION_ENABLED:
+        print("✓ Validation: ENABLED")
+    else:
+        print("⚠ Validation: DISABLED (optional feature)")
     
     print("\n" + "=" * 70)
     print("API ENDPOINTS")
     print("=" * 70)
     print("GET  /api/health              - Health check")
-    print("GET  /api/validator/status    - Validator status (NEW)")
-    print("POST /api/validate/audio      - Validate baby voice only (NEW)")
+    print("GET  /api/validator/status    - Validator status")
+    print("POST /api/validate/audio      - Validate baby voice only")
     print("POST /api/predict/upload      - Upload + Validate + Predict")
     print("POST /api/predict/record      - Record + Validate + Predict")
     print("GET  /api/classes             - Get cry types")
     print("=" * 70)
     
-    print("\n🚀 Starting server on http://localhost:5000")
+    print(f"\n🚀 Starting server on http://0.0.0.0:{port}")
     print("=" * 70 + "\n")
-    print(f"✓ Running on port: {port}")
     
     app.run(host='0.0.0.0', port=port, debug=False)
