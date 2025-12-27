@@ -360,11 +360,21 @@ LABEL_ENCODER_PATH = 'models/label_encoder.json'
 # Global models
 validator = None
 cry_predictor = None
+VALIDATION_ENABLED = False
 
 
 def init_models():
     """Initialize both models"""
-    global validator, cry_predictor
+    global validator, cry_predictor, VALIDATION_ENABLED
+
+    try:
+        print("\nInitializing Cry Classifier...")
+        cry_predictor = InfantCryPredictor(
+            model_path=CRY_CLASSIFIER_MODEL_PATH,
+            label_encoder_path=LABEL_ENCODER_PATH,
+            device='cuda' if torch.cuda.is_available() else 'cpu'
+        )
+        print("✓ Cry classifier loaded successfully!")
     
     try:
         print("\nInitializing Baby Voice Validator...")
@@ -443,6 +453,7 @@ def health_check():
     """Health check"""
     return jsonify({
         'status': 'healthy',
+        'validation_enabled': VALIDATION_ENABLED,
         'validator_loaded': validator is not None,
         'cry_predictor_loaded': cry_predictor is not None,
         'device': cry_predictor.device if cry_predictor else None,
@@ -527,6 +538,13 @@ def predict_upload():
         - validation: Validation result
         - prediction: Cry type classification (only if validated)
     """
+    if validator is None:
+        return jsonify({
+            'success': False,
+            'error': 'Validator not initialized',
+            'message': 'The validation model is not available. Please contact support.'
+        }), 503
+        
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
@@ -559,18 +577,20 @@ def predict_upload():
         audio, sr = load_audio_file(temp_path)
         
         # STEP 1: VALIDATE (Baby voice check)
-        validation_result = validator.validate_audio_array(audio, sr, threshold=validation_threshold)
-        
-        # If NOT baby voice, return early
-        if not validation_result['is_baby_voice']:
-            os.remove(temp_path)
-            return jsonify({
-                'success': False,
-                'error': 'Audio validation failed',
-                'message': 'This does not appear to be a baby cry. Please upload baby cry audio only.',
-                'validation': validation_result,
-                'timestamp': datetime.now().isoformat()
-            }), 400
+        validation_result = None
+        if VALIDATION_ENABLED and validator is not None:
+            validation_result = validator.validate_audio_array(audio, sr, threshold=validation_threshold)
+            
+            # If NOT baby voice, return early
+            if not validation_result['is_baby_voice']:
+                os.remove(temp_path)
+                return jsonify({
+                    'success': False,
+                    'error': 'Audio validation failed',
+                    'message': 'This does not appear to be a baby cry. Please upload baby cry audio only.',
+                    'validation': validation_result,
+                    'timestamp': datetime.now().isoformat()
+                }), 400
         
         # STEP 2: CLASSIFY (Cry type prediction)
         prediction_result = cry_predictor.predict_array(audio, sr, confidence_threshold)
